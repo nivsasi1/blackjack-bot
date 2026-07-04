@@ -184,4 +184,68 @@ check(35 < kb.kelly_bet() < 42, True, "half-Kelly ~ bankroll*edge/1.32/2")
 kb.running_count = 0.0
 check(kb.kelly_bet(), 0.0, "no edge -> Kelly bet 0")
 
+# --- split-hand context (bugs 1-3 fixes) ------------------------------------
+# A split hand is never allowed to surrender (opening hand would).
+check(recommend(["T", "6"], "10", -1.0, R, from_split=True)["action"], HIT,
+      "split 16 v 10 at TC-1 hits, not surrender")
+check(recommend(["T", "6"], "10", 0.0, R, from_split=True)["action"], STAND,
+      "split 16 v 10 at TC0 stands (I18 dev applies), still not surrender")
+check(recommend(["T", "5"], "10", 0.0, R, from_split=True)["action"], HIT,
+      "split 15 v 10 hits (no post-split surrender)")
+# ...and it can only double when DAS is offered.
+das = Rules(double_after_split=True)
+no_das = Rules(double_after_split=False)
+check(recommend(["5", "6"], "6", 0.0, das, from_split=True)["action"], DOUBLE,
+      "split 11 v 6 doubles when DAS on")
+check(recommend(["5", "6"], "6", 0.0, no_das, from_split=True)["action"], HIT,
+      "split 11 v 6 hits when DAS off")
+# A count-deviation double (9 v 2 @ TC+1) also respects DAS post-split.
+check(recommend(["4", "5"], "2", 1.0, no_das, from_split=True)["action"], HIT,
+      "split 9 v 2 deviation double suppressed when DAS off")
+check(recommend(["4", "5"], "2", 1.0, das, from_split=True)["action"], DOUBLE,
+      "split 9 v 2 deviation double allowed when DAS on")
+# Split hand reaching 21 is not a blackjack (stands, pays even later).
+check(recommend(["A", "T"], "9", 0.0, R, from_split=True)["action"], STAND,
+      "split A+T=21 stands and is not flagged blackjack")
+# Opening-hand behaviour is unchanged.
+check(recommend(["T", "6"], "10", 0.0, R)["action"], SURRENDER,
+      "opening 16 v 10 still surrenders")
+
+# --- simulator: resplit cap + validation ------------------------------------
+from bjbot.simulator import SimConfig, SimRules, _play_player_hand, run_sim
+
+
+class _FixedShoe:
+    def __init__(self, cards):
+        self.cards = list(cards)
+        self.dealt = 0
+
+    def draw(self):
+        c = self.cards[self.dealt]
+        self.dealt += 1
+        return c
+
+
+class _NullCounter:
+    def see(self, rank):
+        pass
+
+
+# Feed an endless stream of 8s to a pair of 8s: without a cap this splits
+# forever; the cap must hold total hands to max_split_hands (4).
+rules4 = SimRules(max_split_hands=4, double_after_split=True)
+state = {"hands": 1}
+hands = _play_player_hand(["8", "8"], _FixedShoe(["8"] * 40), _NullCounter(),
+                          "T", 0.0, rules4, state)
+check(state["hands"] <= 4, True, "resplit cap holds at 4 hands")
+check(len(hands) <= 4, True, "no more than 4 hands returned from splitting")
+
+# Simulator smoke: basic strategy EV should be within noise of the house edge.
+val = run_sim(SimConfig(decks=8, penetration=0.5, wong=False, flat=True,
+                        min_bet=5, max_bet=5, rounds=120000,
+                        rules=SimRules(dealer_hits_soft_17=False)))
+check(-1.0 < val["edge_on_action_pct"] < 0.2, True,
+      "flat basic-strategy edge lands near the house edge")
+check(41 < val["win_pct"] < 46, True, "win rate ~43% (never >50%)")
+
 print(f"all {PASSED} checks passed")

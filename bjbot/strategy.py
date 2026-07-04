@@ -79,14 +79,15 @@ DEVIATIONS = [
 
 
 def _deviation(player: list[str], total: int, is_soft: bool, is_pair: bool,
-               dealer: str, tc: float, rules: Rules) -> str | None:
+               dealer: str, tc: float, can_double: bool,
+               can_surrender: bool) -> str | None:
     up = _up(dealer)
     first_two = len(player) == 2
     for kind, key, dev_up, threshold, above, below in DEVIATIONS:
         if dev_up != up:
             continue
         if kind == "surrender":
-            if not (rules.late_surrender and first_two) or is_soft or is_pair:
+            if not can_surrender or is_soft or is_pair:
                 continue
             if key != total:
                 continue
@@ -96,12 +97,12 @@ def _deviation(player: list[str], total: int, is_soft: bool, is_pair: bool,
         else:  # hard
             if is_soft or key != total:
                 continue
-            if above == DOUBLE and not (first_two and rules.can_double):
+            if above == DOUBLE and not can_double:
                 continue
-            # 15/16 vs 9/10/A: when late surrender is available on the first
-            # two cards, the surrender plays above take precedence.
+            # 15/16 vs 9/10/A: when late surrender is available on this hand,
+            # the surrender plays above take precedence.
             if (above == STAND and total in (15, 16) and up >= 9
-                    and rules.late_surrender and first_two):
+                    and can_surrender):
                 continue
         action = above if tc >= threshold else below
         if action is not None:
@@ -134,8 +135,7 @@ def _pair_action(rank: str, up: int, rules: Rules) -> str | None:
     return SPLIT if (2 if das else 4) <= up <= 7 else None
 
 
-def _soft_action(total: int, up: int, rules: Rules, first_two: bool) -> str:
-    can_double = first_two and rules.can_double
+def _soft_action(total: int, up: int, rules: Rules, can_double: bool) -> str:
     if total >= 20:
         return STAND
     if total == 19:  # A8: double vs 6 in H17
@@ -157,15 +157,15 @@ def _soft_action(total: int, up: int, rules: Rules, first_two: bool) -> str:
     return DOUBLE if 5 <= up <= 6 and can_double else HIT
 
 
-def _hard_action(total: int, up: int, rules: Rules, first_two: bool) -> str:
-    can_double = first_two and rules.can_double
+def _hard_action(total: int, up: int, rules: Rules, can_double: bool,
+                 can_surrender: bool) -> str:
     if total >= 17:
-        if (rules.late_surrender and first_two and total == 17
+        if (can_surrender and total == 17
                 and up == 11 and rules.dealer_hits_soft_17):
             return SURRENDER
         return STAND
     if total >= 13:
-        if rules.late_surrender and first_two:
+        if can_surrender:
             if total == 16 and up in (9, 10, 11):
                 return SURRENDER
             if total == 15 and (up == 10 or (up == 11 and rules.dealer_hits_soft_17)):
@@ -185,8 +185,13 @@ def _hard_action(total: int, up: int, rules: Rules, first_two: bool) -> str:
 
 
 def recommend(player_cards: list[str], dealer_up: str, true_count: float = 0.0,
-              rules: Rules | None = None) -> dict:
-    """Best move for the hand. Returns {action, reason, insurance, total, soft}."""
+              rules: Rules | None = None, *, from_split: bool = False) -> dict:
+    """Best move for the hand. Returns {action, reason, insurance, total, soft}.
+
+    from_split=True marks a hand produced by splitting: surrender is never
+    legal on it, and doubling is legal only if the table allows double after
+    split (rules.double_after_split).
+    """
     rules = rules or Rules()
     player = [normalize_rank(r) for r in player_cards]
     dealer = normalize_rank(dealer_up)
@@ -195,16 +200,23 @@ def recommend(player_cards: list[str], dealer_up: str, true_count: float = 0.0,
     first_two = len(player) == 2
     is_pair = first_two and CARD_VALUE[player[0]] == CARD_VALUE[player[1]]
 
+    # Per-hand eligibility. Surrender and double are first-two-cards actions;
+    # a split hand can never surrender and can only double if DAS is offered.
+    can_surrender = rules.late_surrender and first_two and not from_split
+    can_double = (rules.can_double and first_two
+                  and (rules.double_after_split or not from_split))
+
     insurance = up == 11 and true_count >= rules.insurance_tc
 
     if total > 21:
         return {"action": "BUST", "reason": "hand is over 21", "insurance": False,
                 "total": total, "soft": is_soft}
-    if first_two and total == 21:
+    if first_two and total == 21 and not from_split:
         return {"action": STAND, "reason": "blackjack!", "insurance": insurance,
                 "total": total, "soft": is_soft}
 
-    dev = _deviation(player, total, is_soft, is_pair, dealer, true_count, rules)
+    dev = _deviation(player, total, is_soft, is_pair, dealer, true_count,
+                     can_double, can_surrender)
     if dev is not None:
         return {"action": dev,
                 "reason": f"count deviation (TC {true_count:+.1f})",
@@ -217,8 +229,8 @@ def recommend(player_cards: list[str], dealer_up: str, true_count: float = 0.0,
                     "insurance": insurance, "total": total, "soft": is_soft}
 
     if is_soft:
-        action = _soft_action(total, up, rules, first_two)
+        action = _soft_action(total, up, rules, can_double)
     else:
-        action = _hard_action(total, up, rules, first_two)
+        action = _hard_action(total, up, rules, can_double, can_surrender)
     return {"action": action, "reason": "basic strategy",
             "insurance": insurance, "total": total, "soft": is_soft}

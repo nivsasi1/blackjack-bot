@@ -89,15 +89,26 @@ def _bet_for(counter: CardCounter, cfg: SimConfig) -> float:
     return min(bet, cfg.max_bet)
 
 
-def _play_player_hand(cards, shoe, counter, dealer_up, tc, rules, first=True):
+def _play_player_hand(cards, shoe, counter, dealer_up, tc, rules, state,
+                      from_split=False):
     """Play one player hand to completion. Returns list of (cards, bet_mult,
-    surrendered) — a list because splits create multiple hands."""
+    surrendered) — a list because splits create multiple hands.
+
+    `state` is {"hands": n}: the number of hands currently in play from this
+    seat, used to enforce the table's max-split-hands cap. `from_split` marks
+    a hand that came from a split (no surrender; double only if DAS).
+    """
     while True:
-        move = recommend(cards, dealer_up, tc, rules)["action"]
-        if move == SURRENDER and first and len(cards) == 2:
+        move = recommend(cards, dealer_up, tc, rules, from_split=from_split)["action"]
+        # recommend() only emits SURRENDER on an eligible first-two-card,
+        # non-split hand, so this never fires post-split.
+        if move == SURRENDER:
             return [(cards, 0.5, True)]
-        if move == SPLIT and len(cards) == 2 and CARD_VALUE[cards[0]] == CARD_VALUE[cards[1]]:
-            # split into two hands, each gets one new card
+        can_split = (move == SPLIT and len(cards) == 2
+                     and CARD_VALUE[cards[0]] == CARD_VALUE[cards[1]]
+                     and state["hands"] < rules.max_split_hands)
+        if can_split:
+            state["hands"] += 1          # one hand becomes two
             results = []
             is_aces = cards[0] == "A"
             for c in cards:
@@ -107,7 +118,8 @@ def _play_player_hand(cards, shoe, counter, dealer_up, tc, rules, first=True):
                     results.append((hand, 1.0, False))  # aces: one card, done
                 else:
                     results.extend(_play_player_hand(
-                        hand, shoe, counter, dealer_up, tc, rules, first=False))
+                        hand, shoe, counter, dealer_up, tc, rules, state,
+                        from_split=True))
             return results
         if move == DOUBLE and len(cards) == 2:
             nc = shoe.draw(); counter.see(nc)
@@ -159,7 +171,7 @@ def _round_outcome(shoe, counter, cfg) -> float:
             return cfg.rules.blackjack_pays
         return -1.0
 
-    hands = _play_player_hand(p, shoe, counter, d_up, tc, rules)
+    hands = _play_player_hand(p, shoe, counter, d_up, tc, rules, {"hands": 1})
     counter.see(d_hole)
 
     if hands[0][2]:  # surrendered
