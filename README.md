@@ -17,6 +17,13 @@ researched and sourced in [docs/COUNTING.md](docs/COUNTING.md).
 Runs entirely locally. Nothing is automated — it never clicks or bets for
 you; it only reads pixels and shows advice in an always-on-top overlay.
 
+> **Does it actually make money on Stake / live-dealer online? No.** A
+> 3-million-hand-per-scenario simulation ([docs/STAKE_ANALYSIS.md](docs/STAKE_ANALYSIS.md))
+> shows that at Stake's ~50% shoe penetration the counting edge is real but
+> worth about **$0.40/hour**, needing ~5,000 hours of play before the result
+> is even distinguishable from luck. Counting only pays on deep-dealt (75%+)
+> shoe games. Run `python main.py sim` to check any game before you trust it.
+
 ## Read this first (honestly)
 
 - **Counting only works on live-dealer shoe games.** RNG/virtual blackjack
@@ -110,6 +117,22 @@ python main.py manual
 
 `u` undo · `n` new shoe · `s` status · `q` quit.
 
+## Simulate a game before you play it (`sim`)
+
+Prove out whether a game is worth playing — no money, no guessing:
+
+```bash
+python main.py sim --decks 8 --pen 0.5 --min-bet 5 --max-bet 100 \
+                   --enter-tc 2 --rounds-per-hour 50 --rounds 3000000
+```
+
+It deals millions of shoes, plays basic strategy + index deviations, Wongs
+in/out at your threshold, and reports per-hand win/push/loss, edge on money
+wagered, **EV/hour**, standard deviation, **N0** (rounds needed to overcome
+variance), and **risk of ruin** for your bankroll. Flags: `--h17`, `--no-das`,
+`--surrender`, `--bj65`, `--flat`, `--play-all`. See
+[docs/STAKE_ANALYSIS.md](docs/STAKE_ANALYSIS.md) for the Stake verdict.
+
 ## Configuration (`config.json`)
 
 Copy `config.example.json` if you want to hand-edit. Key settings:
@@ -145,8 +168,10 @@ python test_bjbot.py   # 91 checks over the counter + strategy engines
 ## Layout
 
 ```
-main.py              CLI entry (calibrate / watch / manual)
+main.py              CLI entry (calibrate / watch / manual / sim)
 docs/COUNTING.md     the research: systems, TC math, edge model, indices, Kelly
+docs/STAKE_ANALYSIS.md  simulation verdict: why Stake/live-online isn't beatable
+bjbot/simulator.py   Monte-Carlo EV / N0 / risk-of-ruin engine
 bjbot/counter.py     8 counting systems, true/betting count, edge %, Kelly
 bjbot/strategy.py    basic strategy tables + Illustrious 18 + Fab 4 indices
 bjbot/capture.py     mss screen-region grabber
