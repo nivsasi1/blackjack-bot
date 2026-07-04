@@ -16,12 +16,28 @@ def _load_config(path: str) -> dict:
 
 
 def _make_counter(cfg: dict) -> CardCounter:
+    base_edge = cfg.get("base_house_edge")
+    if base_edge is None:
+        from .counter import estimate_base_house_edge
+        r = cfg.get("rules", {})
+        base_edge = estimate_base_house_edge(
+            decks=cfg.get("decks", 8),
+            dealer_hits_soft_17=r.get("dealer_hits_soft_17", True),
+            double_after_split=r.get("double_after_split", True),
+            late_surrender=r.get("late_surrender", True),
+            blackjack_pays_65=r.get("blackjack_pays_65", False),
+        )
     return CardCounter(
         decks=cfg.get("decks", 8),
+        system_name=cfg.get("system", "hi-lo"),
         penetration=cfg.get("penetration", 0.5),
-        base_house_edge=cfg.get("base_house_edge", 0.005),
+        base_house_edge=base_edge,
         edge_per_tc=cfg.get("edge_per_tc", 0.005),
         enter_tc=cfg.get("enter_tc", 2.0),
+        tc_method=cfg.get("tc_method", "exact"),
+        half_deck_divisor=cfg.get("half_deck_divisor", True),
+        bankroll=cfg.get("bankroll", 0.0),
+        kelly_divisor=cfg.get("kelly_divisor", 2.0),
     )
 
 
@@ -91,7 +107,7 @@ def run_watch(config_path: str, templates_dir: str) -> None:
             try:
                 for rank, _pos in table_det.feed(table_grab.grab_gray()):
                     counter.see(rank)
-                    print(f"seen {rank}  RC {counter.running_count:+d}  "
+                    print(f"seen {rank}  RC {counter.running_count:+.1f}  "
                           f"TC {counter.true_count:+.1f}")
 
                 player_hits = hand_det._match_frame(player_grab.grab_gray())
@@ -119,6 +135,7 @@ def run_watch(config_path: str, templates_dir: str) -> None:
 HELP = """\
 Commands:
   5 k a 10 ...        count cards as they are dealt (any ranks, spaces between)
+                      (red-7 system: 'r7' = red seven, 'b7' = black seven)
   h <cards> v <up>    advice for your hand, e.g.:  h a 7 v 9   /  h 8 8 v 10
                       (cards given here are NOT re-counted)
   u                   undo last counted card
@@ -131,9 +148,17 @@ Commands:
 def _print_status(counter: CardCounter) -> None:
     s = counter.status()
     flag = "ENTER ✅" if s["enter"] else "wait"
-    print(f"  RC {s['running_count']:+d} | TC {s['true_count']:+.1f} | "
-          f"decks left {s['decks_remaining']} | edge {s['player_edge_pct']:+.2f}% | "
-          f"{flag} | bet {s['bet_units']}u")
+    parts = [f"RC {s['running_count']:+.1f}", f"TC {s['true_count']:+.1f}"]
+    if s.get("betting_tc") != s.get("true_count"):
+        parts.append(f"bet-TC {s['betting_tc']:+.1f}")
+    if "key_count" in s:
+        parts.append(f"key {s['key_count']:+.0f} / pivot {s['pivot']:+d}")
+    parts += [f"decks left {s['decks_remaining']}",
+              f"edge {s['player_edge_pct']:+.2f}%", flag,
+              f"bet {s['bet_units']}u"]
+    if "kelly_bet" in s:
+        parts.append(f"kelly {s['kelly_bet']:.0f}")
+    print("  " + " | ".join(parts))
 
 
 def run_manual(config_path: str | None = None) -> None:
@@ -145,7 +170,11 @@ def run_manual(config_path: str | None = None) -> None:
             pass
     counter = _make_counter(cfg)
     rules = _make_rules(cfg)
-    print(f"Manual mode — {counter.decks} decks, Hi-Lo. Type '?' for help.\n")
+    sysinfo = counter.system
+    print(f"Manual mode — {counter.decks} decks, {sysinfo.name} "
+          f"(level {sysinfo.level}, {'balanced' if sysinfo.balanced else 'unbalanced'}, "
+          f"BC {sysinfo.bc:.2f} PE {sysinfo.pe:.2f} IC {sysinfo.ic:.2f}). "
+          f"Type '?' for help.\n")
     _print_status(counter)
 
     while True:
@@ -185,14 +214,18 @@ def run_manual(config_path: str | None = None) -> None:
             except ValueError as e:
                 print(f"  {e}")
             continue
-        # otherwise: a list of dealt cards to count
+        # otherwise: a list of dealt cards to count ('r7'/'b7' ok in red-7)
+        tokens = line.split()
         try:
-            ranks = [normalize_rank(t) for t in line.split()]
+            for t in tokens:
+                if not (counter.system_name == "red-7"
+                        and t.upper() in ("R7", "B7")):
+                    normalize_rank(t)  # validate before counting any of them
         except ValueError as e:
             print(f"  {e} (type '?' for help)")
             continue
-        for r in ranks:
-            counter.see(r)
+        for t in tokens:
+            counter.see(t)
         _print_status(counter)
 
     print("bye")

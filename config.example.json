@@ -1,13 +1,18 @@
 {
+  "system": "hi-lo",
   "decks": 8,
   "penetration": 0.5,
-  "base_house_edge": 0.005,
   "edge_per_tc": 0.005,
   "enter_tc": 2.0,
+  "tc_method": "exact",
+  "half_deck_divisor": true,
+  "bankroll": 0,
+  "kelly_divisor": 2.0,
   "rules": {
     "dealer_hits_soft_17": true,
     "double_after_split": true,
     "late_surrender": true,
+    "blackjack_pays_65": false,
     "insurance_tc": 3.0
   },
   "table":  { "left": 400, "top": 300, "width": 1100, "height": 500 },

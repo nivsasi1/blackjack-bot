@@ -56,7 +56,7 @@ class Overlay:
                 self.banner.config(
                     bg=RED, text=f"WAIT  ({s.get('player_edge_pct', 0):+.2f}%)")
             self.counts.config(
-                text=(f"RC {s.get('running_count', 0):+d}   "
+                text=(f"RC {s.get('running_count', 0):+.1f}   "
                       f"TC {s.get('true_count', 0):+.1f}   "
                       f"decks left {s.get('decks_remaining', 0):.1f}"))
             move = s.get("move")

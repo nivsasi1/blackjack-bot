@@ -3,7 +3,7 @@
 Run:  python test_bjbot.py
 """
 
-from bjbot.counter import CardCounter
+from bjbot.counter import CardCounter, SYSTEMS, estimate_base_house_edge
 from bjbot.strategy import DOUBLE, HIT, SPLIT, STAND, SURRENDER, Rules, recommend
 
 PASSED = 0
@@ -102,5 +102,86 @@ check(act(["T", "5"], "9", tc=2.0), SURRENDER, "15 v 9 surrenders at TC>=2")
 check(act(["T", "5"], "A", tc=1.0), SURRENDER, "15 v A surrenders at TC>=1")
 check(recommend(["9", "9"], "A", 3.5)["insurance"], True, "insurance at TC>=3")
 check(recommend(["9", "9"], "A", 2.0)["insurance"], False, "no insurance below TC 3")
+
+# --- multi-system counting ---------------------------------------------------
+# KO (unbalanced): IRC = 4 - 4*decks, 7 counts +1, pivot RC +4 == TC +4
+ko = CardCounter(decks=6, system_name="ko")
+check(ko.running_count, -20.0, "KO 6-deck IRC is -20")
+check(CardCounter(decks=8, system_name="ko").running_count, -28.0, "KO 8-deck IRC is -28")
+ko.see("7")
+check(ko.running_count, -19.0, "KO counts 7 as +1")
+check(ko.key_count, -4, "KO 6-deck key count is -4")
+check(ko.should_enter, False, "KO below key count -> wait")
+for _ in range(16):  # +16 more brings RC to -3, past the key count
+    ko.see("2")
+check(ko.running_count, -3.0, "KO RC after low run")
+check(ko.should_enter, True, "KO at/above key count -> enter")
+check(SYSTEMS["ko"].pivot_rc(6), 4, "KO pivot RC is +4 at any deck count")
+check(SYSTEMS["ko"].pivot_rc(8), 4, "KO pivot RC is +4 (8 decks too)")
+
+# KO pivot == Hi-Lo TC +4 regardless of shoe depth
+ko2 = CardCounter(decks=6, system_name="ko")
+for _ in range(24):  # 24 low cards: RC -20 -> +4 == pivot
+    ko2.see("3")
+check(round(ko2.true_count, 2), 4.0, "KO at pivot -> TC-equivalent +4")
+
+# Red 7: IRC = -2*decks, color-blind 7 = +0.5, r7/b7 exact
+r7 = CardCounter(decks=6, system_name="red-7")
+check(r7.running_count, -12.0, "Red 7 6-deck IRC is -12")
+r7.see("7")
+check(r7.running_count, -11.5, "color-blind 7 counts +0.5")
+r7.see("r7")
+check(r7.running_count, -10.5, "red seven counts +1")
+r7.see("b7")
+check(r7.running_count, -10.5, "black seven counts 0")
+check(r7.undo(), "7", "undo returns the rank for b7")
+check(r7.running_count, -10.5, "undo of black 7 keeps RC")
+check(SYSTEMS["red-7"].pivot_rc(6), 0, "Red 7 pivot RC is 0")
+check(CardCounter(decks=8, system_name="red-7").key_count, 0.0,
+      "Red 7 key count falls back to pivot (TC+2) = RC 0")
+
+# Ace-neutral systems: ace side count adjusts betting count only
+ho = CardCounter(decks=6, system_name="hi-opt-1")
+ho.see("A")
+check(ho.running_count, 0.0, "Hi-Opt I: ace tag is 0")
+check(ho.betting_count < ho.true_count, True,
+      "ace gone -> ace-poor -> betting count below playing count")
+check(SYSTEMS["hi-opt-2"].tags["4"], 2, "Hi-Opt II: 4 counts +2")
+check(SYSTEMS["omega-2"].tags["9"], -1, "Omega II: 9 counts -1")
+check(SYSTEMS["zen"].tags["A"], -1, "Zen counts the ace")
+check(SYSTEMS["wong-halves"].tags["5"], 1.5, "Wong Halves: 5 counts +1.5")
+check(SYSTEMS["wong-halves"].tags["2"], 0.5, "Wong Halves: 2 counts +0.5")
+
+# TC display conventions: RC -2 with exactly 4 decks remaining -> -0.5
+tcc = CardCounter(decks=6, half_deck_divisor=False)
+for _ in range(104):  # 2 decks of 8s: RC stays 0, 4 decks remain
+    tcc.see("8")
+tcc.see("K")
+tcc.see("K")  # RC -2, ~3.96 decks left; use half_deck path off for exactness
+tcc.running_count = -2.0
+tcc.cards_seen = 104
+check(tcc.true_count, -0.5, "exact TC -0.5")
+tcc.tc_method = "floor"
+check(tcc.displayed_tc, -1.0, "floor(-0.5) = -1")
+tcc.tc_method = "trunc"
+check(tcc.displayed_tc, 0.0, "trunc(-0.5) = 0")
+
+# Rule-based house edge anchors (Wizard of Odds figures)
+check(round(estimate_base_house_edge(6, True, True, False), 4), 0.0064,
+      "6D H17 DAS noLS = 0.64%")
+check(round(estimate_base_house_edge(6, False, True, False), 4), 0.0042,
+      "S17 is worth -0.22%")
+check(estimate_base_house_edge(6, True, True, False, blackjack_pays_65=True)
+      > 0.019, True, "6:5 adds +1.39%")
+
+# Kelly sizing: TC +3 with 0.5% base -> ~1% edge; half-Kelly on 10k ~ 38
+kb = CardCounter(decks=8, bankroll=10000, kelly_divisor=2.0,
+                 base_house_edge=0.005, edge_per_tc=0.005)
+kb.running_count = 24.0
+kb.cards_seen = 0  # 8 decks remain -> TC +3
+check(round(kb.true_count, 2), 3.0, "kelly setup TC +3")
+check(35 < kb.kelly_bet() < 42, True, "half-Kelly ~ bankroll*edge/1.32/2")
+kb.running_count = 0.0
+check(kb.kelly_bet(), 0.0, "no edge -> Kelly bet 0")
 
 print(f"all {PASSED} checks passed")

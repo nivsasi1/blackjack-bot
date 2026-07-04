@@ -1,10 +1,18 @@
 # bjbot — blackjack card counter & strategy advisor
 
-Watches a blackjack table on **your own screen**, keeps a Hi-Lo count, flags
-when the shoe turns favorable (with an estimated player-edge %), and
-recommends the mathematically best move — hit / stand / double / split /
-surrender / insurance — including the Illustrious 18 + Fab 4 count-based
-deviations from basic strategy.
+Watches a blackjack table on **your own screen**, keeps a running count,
+flags when the shoe turns favorable (with an estimated player-edge % and
+Kelly bet size), and recommends the mathematically best move — hit / stand
+/ double / split / surrender / insurance — including the Illustrious 18 +
+Fab 4 count-based deviations from basic strategy.
+
+Eight counting systems are built in: **Hi-Lo** (default), **KO** and
+**Red 7** (unbalanced — no true-count division; IRC/key-count/pivot),
+**Hi-Opt I/II** and **Omega II** (ace-neutral, with automatic ace
+side-count adjustment of the betting count), **Zen**, and **Wong Halves**.
+The math behind every constant — system tables, true-count conventions,
+edge model, index values, Kelly/risk formulas, live-dealer viability — is
+researched and sourced in [docs/COUNTING.md](docs/COUNTING.md).
 
 Runs entirely locally. Nothing is automated — it never clicks or bets for
 you; it only reads pixels and shows advice in an always-on-top overlay.
@@ -108,30 +116,38 @@ Copy `config.example.json` if you want to hand-edit. Key settings:
 
 | key | default | meaning |
 |---|---|---|
+| `system` | "hi-lo" | counting system: `hi-lo`, `ko`, `red-7`, `hi-opt-1`, `hi-opt-2`, `omega-2`, `zen`, `wong-halves` |
 | `decks` | 8 | decks in the shoe (live tables are usually 8, some 6) |
-| `enter_tc` | 2.0 | true count that triggers the green ENTER flag |
-| `base_house_edge` | 0.005 | house edge off the top for the table's rules |
+| `enter_tc` | 2.0 | true count that triggers the green ENTER flag (unbalanced systems use their key count instead) |
 | `edge_per_tc` | 0.005 | edge gained per true-count point (~0.5% standard) |
+| `base_house_edge` | *(auto)* | omit to estimate it from `rules`; set explicitly to override |
+| `tc_method` | "exact" | TC display convention: `exact` / `floor` / `round` / `trunc` |
+| `half_deck_divisor` | true | divide by decks remaining to the nearest half deck |
+| `bankroll` | 0 | set > 0 to get Kelly bet sizing in the status |
+| `kelly_divisor` | 2.0 | 2 = half-Kelly (recommended), 1 = full Kelly |
 | `rules.dealer_hits_soft_17` | true | H17 vs S17 |
 | `rules.double_after_split` | true | DAS |
 | `rules.late_surrender` | true | set false if the table has no surrender |
+| `rules.blackjack_pays_65` | false | 6:5 blackjack (adds +1.39% house edge — don't play these) |
 | `rules.insurance_tc` | 3.0 | take insurance at/above this true count |
 
-Edge estimate = `TC × edge_per_tc − base_house_edge` — the standard Hi-Lo
-approximation (TC +1 ≈ break-even, +2 ≈ +0.5%, +3 ≈ +1%). Set
-`base_house_edge` to your actual table's figure for honest numbers.
+Edge estimate = `betting TC × edge_per_tc − base_house_edge` — the
+standard approximation (TC +1 ≈ break-even, +2 ≈ +0.5%, +3 ≈ +1%). When
+`base_house_edge` is omitted it is derived from your rule set using
+Wizard-of-Odds anchor figures (see docs/COUNTING.md §4).
 
 ## Tests
 
 ```bash
-python test_bjbot.py   # 57 checks over the counter + strategy engines
+python test_bjbot.py   # 91 checks over the counter + strategy engines
 ```
 
 ## Layout
 
 ```
 main.py              CLI entry (calibrate / watch / manual)
-bjbot/counter.py     Hi-Lo running/true count, edge %, enter flag, bet ramp
+docs/COUNTING.md     the research: systems, TC math, edge model, indices, Kelly
+bjbot/counter.py     8 counting systems, true/betting count, edge %, Kelly
 bjbot/strategy.py    basic strategy tables + Illustrious 18 + Fab 4 indices
 bjbot/capture.py     mss screen-region grabber
 bjbot/detector.py    template matching, stability filter, dedup per round
